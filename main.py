@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Callable
 
 import sys
 from enum import Enum
@@ -27,7 +27,7 @@ WINDOW_HEIGHT = 600
 # PLAYER_POINTS_RECT   = pygame.Rect(LEFT_MARGIN, TOP_MARGIN + BOARD_HEIGHT + 10, POINTS_SIZE, POINTS_SIZE)
 # OPPONENT_POINTS_RECT = pygame.Rect(LEFT_MARGIN + POINTS_SIZE + 140, TOP_MARGIN + BOARD_HEIGHT + 10, POINTS_SIZE, POINTS_SIZE)
 #
-# BOARD_BACKGROUD_RECT = pygame.Rect(LEFT_MARGIN, TOP_MARGIN, ROWS*SQUARE_SIZE, COLS*SQUARE_SIZE)
+# BOARD_BACKGROUND_RECT = pygame.Rect(LEFT_MARGIN, TOP_MARGIN, ROWS*SQUARE_SIZE, COLS*SQUARE_SIZE)
 
 # Cores
 WHITE = (230, 230, 230)
@@ -36,14 +36,12 @@ BG_COLOR = (0x36, 0x38, 0x6B)
 PLAYER_COLORS = [(0x50, 0x96, 0x32), (0xEB, 0x49, 0x00), WHITE]  # Azul e vermelho
 BTN_COLORS = (0x7c, 0x7F, 0xEA)
 
-# Janela
-pygame.display.set_caption("Seega")
-
+pygame.init()
 
 def fit_text_size(text, font, max_width, invert):
     tamanho: int = 0
 
-    # enquanto o tamanho que cabe do texto não tiver chegado no ultimo caractere e o tamanho do texto não tiver passado o max_width
+    # enquanto o tamanho que cabe do texto não tiver chegado no último caractere e o tamanho do texto não tiver passado o max_width
     while tamanho < len(text) and font.size((text[-(tamanho + 1):]) if invert else (text[:tamanho + 1]))[
         0] <= max_width:
         # incrementa uma letra que ira ser mostrada
@@ -52,10 +50,10 @@ def fit_text_size(text, font, max_width, invert):
     return tamanho
 
 
+
 def split_text_to_fit(text, font, max_width):
     lines = []
     index = 0
-    tamanho = 0
 
     while True:
         # pega a quantidade de caracteres que cabem no max_width
@@ -71,8 +69,67 @@ def split_text_to_fit(text, font, max_width):
 
     return lines
 
+
+
+def draw_any_rect_with_text(window: Surface, font: Font,color:tuple[int, int, int], rect: RectType, text: str):
+    pygame.draw.rect(window, color, rect)
+    pygame.draw.rect(window, BLACK, rect, 2)
+
+    btn_text = font.render(text, True, BLACK)
+    text_rect = btn_text.get_rect(center=rect.center)
+    window.blit(btn_text, text_rect)
+
+class Button:
+    def __init__(self, window: Surface, font: Font ,text: str, function: Callable, rect: RectType):
+        self.window   :Surface  = window
+        self.font     :Font     = font
+        self.rect     :RectType = rect
+        self.text     :str      = text
+        self.function :Callable = function
+        self.color    :tuple[int, int, int] = (0x00, 0x00, 0x00)
+
+    def draw(self):
+        draw_any_rect_with_text(self.window, self.font, self.color, self.rect, self.text)
+
+    def click(self):
+        self.function()
+
 class Buttons:
-    pass
+    def __init__(self, window: Surface, quant_buttons: int, text_list: List[str], function_list: List[Callable],
+                 left_margin: int, top_margin: int, font: Font):
+        self.window : Surface = window
+
+        self.buttons :List[Button] = []
+
+        left_margin_now = left_margin
+        for index in range(quant_buttons):
+            font_size = font.size(text_list[index])
+            rect = pygame.Rect(left_margin_now, top_margin, font_size[0], font_size[1])
+            self.buttons.append(Button(self.window, font, text_list[index], function_list[index], rect))
+            left_margin_now += font_size[0]
+
+
+    class BTNPressed(Enum):
+        NO_BTN      = -1
+        RESTART_BTN = 0
+        CANCEL_BTN  = 1
+        START_BTN   = 2
+        GIVE_UP_BTN = 3
+
+
+    def verify_btn(self, position=pygame.mouse.get_pos()) -> BTNPressed:
+        for index in range(len(self.buttons)):
+            if self.buttons[index].rect.collidepoint(position):
+                return BTNPressed(index)
+
+        return BTNPressed.NO_BTN
+
+
+    def draw_btns(self):
+        for button in self.buttons:
+            button.draw()
+
+
 
 class Chat:
     def __init__(self, window: Surface, top_margin: int, left_margin: int, chat_height  :int, chat_width   :int):
@@ -181,7 +238,9 @@ class Board:
 
 
 class Window:
-    def __init__(self, width: int, height: int):
+    def __init__(self, width: int, height: int, btn_text_list :List[str],btn_function_list: List[Callable]):
+        pygame.display.set_caption("Seega")
+
         self.general_font = pygame.font.SysFont("Arial", 20)
 
         self.window : Surface = pygame.display.set_mode((width, height))
@@ -191,34 +250,70 @@ class Window:
         side_margin         :int = 20
         square_quant_pixels :int = 100
 
+        btn_text_list     :List[str]      = btn_text_list
+        btn_function_list :List[Callable] = btn_function_list
+
         chat_left_margin :int = side_margin + board_size*square_quant_pixels+side_margin
         chat_height      :int = board_size*square_quant_pixels
         chat_width       :int = self.window.get_width() - chat_left_margin - side_margin
 
-        self.board  : Board   = Board(self.window, board_size, side_margin, top_margin, square_quant_pixels)
-        self.chat   : Chat    = Chat(self.window, top_margin, chat_left_margin, chat_height, chat_width)
+        buttons_top_margin :int = top_margin + chat_height + top_margin
+
+        self.board   : Board   = Board(self.window, board_size, side_margin, top_margin, square_quant_pixels)
+        self.chat    : Chat    = Chat(self.window, top_margin, chat_left_margin, chat_height, chat_width)
+        self.buttons : Buttons = Buttons(self.window, 4, btn_text_list, btn_function_list,
+                                         chat_left_margin, buttons_top_margin, self.general_font)
 
 
     def update_window(self, board_color:tuple[int, int, int], players: List[Player]):
         self.window.fill(BG_COLOR)
         self.board.draw_board(board_color, players)
         self.chat.draw_chat()
+        self.buttons.draw_btns()
 
 
 
 class Game:
     def __init__(self):
-        pygame.init()
 
         self.run            :bool  = True
 
         self.game_state     :int = -1
         self.current_player :int = 0
+        self.sistem_player  :int = 0
 
         self.players :List[Player] = []
 
         self.clock:Clock = pygame.time.Clock()
-        self.window: Window = Window(1000, 600)
+        self.window: Window = Window(1000, 600,
+                                     ["Reiniciar partida", "Cancelar", "Desistir", "Start"],
+                                     [self.reset, self.start, self.give_up, self.cancel])
+
+
+    def reset(self, init :bool = False):
+        self.window = Window(1000, 600)
+
+        if init:
+            for player in self.players:
+                player.points = 0
+
+        self.window.chat.add_chat_messages("sistema", f"clique em start para começar.")
+
+
+    def start(self):
+        if self.game_state == -1:
+            self.game_state += 1
+            self.sistem_player = 0
+
+
+    def give_up(self):
+        self.players[1].points += 1
+        self.reset(False)
+
+
+    def cancel(self):
+        self.window.board.selected_piece = [-1, -1]
+
 
     def show_screen(self):
         if self.game_state == -1:
@@ -230,9 +325,14 @@ class Game:
         self.window.update_window(board_color, self.players)
         pygame.display.flip()
 
+
     def run_game(self):
         while self.run:
             self.show_screen()
+            
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.run = False
 
 
 
