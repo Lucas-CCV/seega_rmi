@@ -80,13 +80,14 @@ def draw_any_rect_with_text(window: Surface, font: Font,color:tuple[int, int, in
     window.blit(btn_text, text_rect)
 
 class Button:
-    def __init__(self, window: Surface, font: Font ,text: str, function: Callable, rect: RectType):
+    def __init__(self, window: Surface, font: Font ,text: str,
+                 function: Callable, rect: RectType, color :tuple[int, int, int]):
         self.window   :Surface  = window
         self.font     :Font     = font
         self.rect     :RectType = rect
         self.text     :str      = text
         self.function :Callable = function
-        self.color    :tuple[int, int, int] = (0x00, 0x00, 0x00)
+        self.color    :tuple[int, int, int] = color
 
     def draw(self):
         draw_any_rect_with_text(self.window, self.font, self.color, self.rect, self.text)
@@ -100,13 +101,14 @@ class Buttons:
         self.window : Surface = window
 
         self.buttons :List[Button] = []
+        self.color = (0x7c, 0x7F, 0xEA)
 
         left_margin_now = left_margin
         for index in range(quant_buttons):
             font_size = font.size(text_list[index])
-            rect = pygame.Rect(left_margin_now, top_margin, font_size[0], font_size[1])
-            self.buttons.append(Button(self.window, font, text_list[index], function_list[index], rect))
-            left_margin_now += font_size[0]
+            rect = pygame.Rect(left_margin_now, top_margin, font_size[0]+10, font_size[1]+10)
+            self.buttons.append(Button(self.window, font, text_list[index], function_list[index], rect, self.color))
+            left_margin_now += font_size[0]+15
 
 
     class BTNPressed(Enum):
@@ -140,6 +142,8 @@ class Chat:
         self.chat_height :int = chat_height
         self.chat_width  :int = chat_width
 
+        self.input_chat_height :int = 35
+
         self.font :Font = pygame.font.SysFont("Arial", 18)
 
         self.max_messages :int = 17
@@ -149,11 +153,13 @@ class Chat:
 
 
     def draw_chat(self):
+        chat_messages_height = self.chat_height - self.input_chat_height - self.top_margin
+
         # desenha um retângulo preto que seria a borda do char e um em cima dele do plano de fundo do chat
         pygame.draw.rect(self.window, WHITE, (self.left_margin, self.top_margin,
-                                                   self.chat_width, self.chat_height))
+                                                   self.chat_width, chat_messages_height))
         pygame.draw.rect(self.window, BLACK, (self.left_margin, self.top_margin,
-                                                   self.chat_width, self.chat_height), 2)
+                                                   self.chat_width, chat_messages_height), 2)
 
         # pega o topo do chat e cria uma margem
         height = self.top_margin + 5
@@ -165,7 +171,7 @@ class Chat:
             height += self.font.get_height() + 5  # adiciona altura da fonte + espaço entre linhas
 
         # faz o retângulo do input
-        input_rect = pygame.Rect(self.left_margin, self.top_margin + self.chat_height + 5, self.chat_width, 30)
+        input_rect = pygame.Rect(self.left_margin, self.top_margin + self.chat_height - self.input_chat_height, self.chat_width, self.input_chat_height)
         pygame.draw.rect(self.window, WHITE, input_rect)
         pygame.draw.rect(self.window, BLACK, input_rect, 2)
 
@@ -329,7 +335,7 @@ class Game:
     def run_game(self):
         while self.run:
             self.show_screen()
-            
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.run = False
