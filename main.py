@@ -103,6 +103,7 @@ class Buttons:
         self.buttons :List[Button] = []
         self.color = (0x7c, 0x7F, 0xEA)
 
+
         left_margin_now = left_margin
         for index in range(quant_buttons):
             font_size = font.size(text_list[index])
@@ -110,21 +111,13 @@ class Buttons:
             self.buttons.append(Button(self.window, font, text_list[index], function_list[index], rect, self.color))
             left_margin_now += font_size[0]+15
 
-
-    class BTNPressed(Enum):
-        NO_BTN      = -1
-        RESTART_BTN = 0
-        CANCEL_BTN  = 1
-        START_BTN   = 2
-        GIVE_UP_BTN = 3
-
-
-    def verify_btn(self, position=pygame.mouse.get_pos()) -> BTNPressed:
+    def verify_btn(self, position=pygame.mouse.get_pos()) -> int:
         for index in range(len(self.buttons)):
             if self.buttons[index].rect.collidepoint(position):
-                return BTNPressed(index)
+                self.buttons[index].click()
+                return index
 
-        return BTNPressed.NO_BTN
+        return -1
 
 
     def draw_btns(self):
@@ -196,9 +189,9 @@ class Chat:
 
 
 class Player:
-    def __init__(self):
+    def __init__(self, color: tuple[int,int,int]):
         self.points :int = 0
-        self.color  :tuple[int,int,int] = (0x0, 0x0, 0x0)
+        self.color  :tuple[int,int,int] = color
 
 
 
@@ -211,11 +204,12 @@ class Board:
         self.left_margin         :int = left_margin
         self.square_quant_pixels :int = square_quant_pixels
 
+        self.pieces_placed        :List[int] = [0, 0]
         self.selected_piece      :List[int] = [-1, -1]
 
         self.board: List[List[int]] = [[-1 for _ in range(self.board_size)] for _ in range(self.board_size)]
 
-
+        self.center :tuple[int, int] = (board_size // 2, board_size // 2)
 
         self.board_background_rect :RectType = pygame.Rect(self.left_margin, self.top_margin,
                                                            self.board_size*self.square_quant_pixels,
@@ -270,6 +264,13 @@ class Window:
         self.buttons : Buttons = Buttons(self.window, 4, btn_text_list, btn_function_list,
                                          chat_left_margin, buttons_top_margin, self.general_font)
 
+    class BTNPressed(Enum):
+        NO_BTN      = -1
+        RESTART_BTN = 0
+        CANCEL_BTN  = 1
+        GIVE_UP_BTN = 2
+        START_BTN   = 3
+
 
     def update_window(self, board_color:tuple[int, int, int], players: List[Player]):
         self.window.fill(BG_COLOR)
@@ -287,17 +288,21 @@ class Game:
         self.game_state     :int = -1
         self.current_player :int = 0
         self.sistem_player  :int = 0
+        self.max_pieces     :int = 12
 
-        self.players :List[Player] = []
+        self.players :List[Player] = [Player((0x50, 0x96, 0x32)), Player((0xEB, 0x49, 0x00))]
+
+        self.window_width  :int = 1000
+        self.window_height :int = 600
+        self.btn_text_list     :List[str]      = ["Reiniciar partida", "Cancelar", "Desistir", "Start"]
+        self.btn_function_list :List[Callable] = [self.reset,  self.cancel, self.give_up, self.start]
 
         self.clock:Clock = pygame.time.Clock()
-        self.window: Window = Window(1000, 600,
-                                     ["Reiniciar partida", "Cancelar", "Desistir", "Start"],
-                                     [self.reset, self.start, self.give_up, self.cancel])
+        self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
 
     def reset(self, init :bool = False):
-        self.window = Window(1000, 600)
+        self.window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
         if init:
             for player in self.players:
@@ -332,7 +337,27 @@ class Game:
         pygame.display.flip()
 
 
+    def handle_placement(self, pos) -> bool:
+        x, y = pos
+        col = (x - self.window.board.left_margin) // self.window.board.square_quant_pixels
+        row = (y - self.window.board.top_margin) // self.window.board.square_quant_pixels
+
+        if 0 <= row < self.window.board.board_size and 0 <= col < self.window.board.board_size:
+            if (row, col) == self.window.board.center:
+                return False
+            if (self.window.board.board[row][col] is None and
+                self.window.board.pieces_placed[self.current_player] < self.max_pieces):
+
+                self.window.board.board[row][col] = self.current_player
+                self.window.board.pieces_placed[self.current_player] += 1
+                return True
+
+        return False
+
+
     def run_game(self):
+        self.reset(False)
+
         while self.run:
             self.show_screen()
 
@@ -340,27 +365,17 @@ class Game:
                 if event.type == pygame.QUIT:
                     self.run = False
 
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    position = pygame.mouse.get_pos()
+                    if self.window.BTNPressed(self.window.buttons.verify_btn(position=position)) == self.window.BTNPressed.NO_BTN:
+                        if self.game_state == 0:
+                            if (self.current_player == self.sistem_player and self.handle_placement(position) and
+                                self.window.board.pieces_placed[self.current_player] % 2 == 0):
 
+                                self.current_player = 1 - self.current_player
 
-class PlayersTurnStatus(Enum):
-    MOVED_WITH_REMOVE    = 1
-    MOVED_WITHOUT_REMOVE = 2
-    INVALID_MOVE         = 3
-    OUT_OF_BOUNDS        = 4
-    OPPONENTS_PIECE      = 5
-    VOID_SPACE           = 6 
-    WON                  = 7
-    CANCEL               = 8
-    NEXT_PLAYER          = 9
-
-
-
-class BTNPressed(Enum):
-    NO_BTN      = 0
-    RESTART_BTN = 1
-    CANCEL_BTN  = 2
-    START_BTN   = 3
-    GIVE_UP_BTN = 4
+                            if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
+                                self.game_state = 1
 
 def main():
     game: Game = Game()
