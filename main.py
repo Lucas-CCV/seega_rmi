@@ -1,4 +1,6 @@
-from typing import List, Callable
+from __future__ import annotations
+from logging import exception
+from typing import List, Callable, Tuple
 
 import sys
 from enum import Enum
@@ -12,6 +14,11 @@ from pygame.time import Clock
 from pygame.font import Font
 from pygame import Surface
 import pygame
+
+from Pyro5.api import expose, Daemon, locate_ns, Proxy
+
+import time
+
 
 WINDOW_WIDTH  = 1000
 WINDOW_HEIGHT = 600
@@ -37,6 +44,10 @@ PLAYER_COLORS = [(0x50, 0x96, 0x32), (0xEB, 0x49, 0x00), WHITE]  # Azul e vermel
 BTN_COLORS = (0x7c, 0x7F, 0xEA)
 
 pygame.init()
+game  : Game
+server: Server
+
+
 
 def fit_text_size(text, font, max_width, invert):
     tamanho: int = 0
@@ -79,6 +90,8 @@ def draw_any_rect_with_text(window: Surface, font: Font,color:tuple[int, int, in
     text_rect = btn_text.get_rect(center=rect.center)
     window.blit(btn_text, text_rect)
 
+
+
 class Button:
     def __init__(self, window: Surface, font: Font ,text: str,
                  function: Callable, rect: RectType, color :tuple[int, int, int]):
@@ -89,11 +102,15 @@ class Button:
         self.function :Callable = function
         self.color    :tuple[int, int, int] = color
 
+
     def draw(self):
         draw_any_rect_with_text(self.window, self.font, self.color, self.rect, self.text)
 
+
     def click(self):
         self.function()
+
+
 
 class Buttons:
     def __init__(self, window: Surface, quant_buttons: int, text_list: List[str], function_list: List[Callable],
@@ -103,13 +120,13 @@ class Buttons:
         self.buttons :List[Button] = []
         self.color = (0x7c, 0x7F, 0xEA)
 
-
         left_margin_now = left_margin
         for index in range(quant_buttons):
             font_size = font.size(text_list[index])
             rect = pygame.Rect(left_margin_now, top_margin, font_size[0]+10, font_size[1]+10)
             self.buttons.append(Button(self.window, font, text_list[index], function_list[index], rect, self.color))
             left_margin_now += font_size[0]+15
+
 
     def verify_btn(self, position=pygame.mouse.get_pos()) -> int:
         for index in range(len(self.buttons)):
@@ -175,7 +192,7 @@ class Chat:
         self.window.blit(input_surface, (input_rect.x + 5, input_rect.y + 5))
 
 
-    def add_chat_messages(self, origin:str, texto:str):
+    def add_chat_messages(self,  texto:str, origin:str):
         # pega o texto para ser adicionado no chat e verifica e separa ele caso não caiba em somente uma linha
         message = split_text_to_fit(f"{origin}: {texto.strip()}", self.font, self.chat_width - 10)
 
@@ -214,6 +231,7 @@ class Board:
         self.board_background_rect :RectType = pygame.Rect(self.left_margin, self.top_margin,
                                                            self.board_size*self.square_quant_pixels,
                                                            self.board_size*self.square_quant_pixels)
+
 
     def draw_board(self, board_color: tuple[int, int, int], players: List[Player]):
         pygame.draw.rect(self.window, BLACK, self.board_background_rect)
@@ -259,8 +277,8 @@ class Window:
 
         buttons_top_margin :int = top_margin + chat_height + top_margin
 
-        self.board   : Board   = Board(self.window, board_size, side_margin, top_margin, square_quant_pixels)
-        self.chat    : Chat    = Chat(self.window, top_margin, chat_left_margin, chat_height, chat_width)
+        self.board: Board = Board(self.window, board_size, side_margin, top_margin, square_quant_pixels)
+        self.chat: Chat = Chat(self.window, top_margin, chat_left_margin, chat_height, chat_width)
         self.buttons : Buttons = Buttons(self.window, 4, btn_text_list, btn_function_list,
                                          chat_left_margin, buttons_top_margin, self.general_font)
 
@@ -271,7 +289,6 @@ class Window:
         GIVE_UP_BTN = 2
         START_BTN   = 3
 
-
     def update_window(self, board_color:tuple[int, int, int], players: List[Player]):
         self.window.fill(BG_COLOR)
         self.board.draw_board(board_color, players)
@@ -280,9 +297,33 @@ class Window:
 
 
 
+@expose
+class Interface:
+    @staticmethod
+    def start(sistem_player: int = 1):
+        global game
+        game.start(sistem_player)
+
+    @staticmethod
+    def give_up(sistem_player:int = None):
+        global game
+        game.give_up(sistem_player)
+
+    @staticmethod
+    def add_chat_messages(texto:str, origin:str="player"):
+        global game
+        game.add_chat_messages(texto, origin)
+
+    @staticmethod
+    def reset(init:bool = False):
+        global game
+        game.reset(init)
+
+
+
 class Game:
     def __init__(self):
-
+        self.enemy_game            = None
         self.run            :bool  = True
 
         self.game_state     :int = -1
@@ -301,41 +342,53 @@ class Game:
         self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
 
-    def reset(self, init :bool = False):
-        self.window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
+    def set_enemy_game(self, enemy_game):
+        self.enemy_game = enemy_game
+
+
+    def start(self,  sistem_player: int = 0):
+        print(f"start({sistem_player})")
+
+        global server
+        if sistem_player == 0:
+            server.messageCommand = Server.MessagesEnum.startGame
+            server.messageArgs    = (1, )
+
+        if self.game_state == -1:
+            self.game_state += 1
+            self.current_player = 0
+            self.sistem_player  = sistem_player
+
+
+    def give_up(self, sistem_player:int = None):
+        print("give_up")
+
+        global server
+        if sistem_player is None:
+            sistem_player = self.sistem_player
+            server.messageCommand = Server.MessagesEnum.giveUp
+
+        self.players[1 - sistem_player].points += 1
+        self.reset(False)
+
+    def add_chat_messages(self, texto:str, origin:str="player"):
+        print("add_chat_messages")
+        self.window.chat.add_chat_messages(texto, origin)
+
+
+    def reset(self, init:bool = False):
+        print("reset")
+        # self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
         if init:
             for player in self.players:
                 player.points = 0
 
-        self.window.chat.add_chat_messages("sistema", f"clique em start para começar.")
-
-
-    def start(self):
-        if self.game_state == -1:
-            self.game_state += 1
-            self.sistem_player = 0
-
-
-    def give_up(self):
-        self.players[1].points += 1
-        self.reset(False)
+        self.add_chat_messages(f"clique em start para começar.", "sistema")
 
 
     def cancel(self):
-        self.window.board.selected_piece = [-1, -1]
-
-
-    def show_screen(self):
-        if self.game_state == -1:
-            board_color = BLACK
-        else:
-            board_color = self.players[self.current_player].color
-
-        self.clock.tick(60)
-        self.window.update_window(board_color, self.players)
-        pygame.display.flip()
-
+        pass
 
     def handle_placement(self, pos) -> bool:
         x, y = pos
@@ -354,9 +407,18 @@ class Game:
 
         return False
 
+    def show_screen(self):
+        if self.game_state == -1:
+            board_color = BLACK
+        else:
+            board_color = self.players[self.current_player].color
+
+        self.clock.tick(60)
+        self.window.update_window(board_color, self.players)
+        pygame.display.flip()
 
     def run_game(self):
-        self.reset(False)
+        self.reset(True)
 
         while self.run:
             self.show_screen()
@@ -367,18 +429,111 @@ class Game:
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     position = pygame.mouse.get_pos()
+                    print(position)
                     if self.window.BTNPressed(self.window.buttons.verify_btn(position=position)) == self.window.BTNPressed.NO_BTN:
+                        print("bo button")
                         if self.game_state == 0:
+                            print("game state == 0")
                             if (self.current_player == self.sistem_player and self.handle_placement(position) and
                                 self.window.board.pieces_placed[self.current_player] % 2 == 0):
-
+                                print("aqui")
                                 self.current_player = 1 - self.current_player
 
                             if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
+                                print("aqui 2")
                                 self.game_state = 1
 
+
+
+
+class Server:
+    class MessagesEnum(Enum):
+        noMessage = -1
+        playerMessages = 0
+        putPeace = 1
+        movePeace = 2
+        startGame = 3
+        passTurn = 4
+        restartGame = 5
+        giveUp = 6
+
+    def __init__(self):
+        self.messageCommand : Server.MessagesEnum = Server.MessagesEnum.noMessage
+        self.messageArgs    : tuple = ()
+        self.messageKargs   : dict = {}
+
+    def run(self):
+        while True:
+            time.sleep(1)
+            try:
+                ns = locate_ns(port=9090)
+                uri_remoto = ns.lookup("1")
+                break
+            except Exception as e:
+                print(f"name server connect:  {e}")
+
+        while True:
+            time.sleep(0.5)
+            if self.messageCommand != Server.MessagesEnum.noMessage:
+                try:
+                    if self.messageCommand == Server.MessagesEnum.playerMessages:
+                        Proxy(uri_remoto).add_chat_messages(*self.messageArgs, **self.messageKargs)
+
+                    elif self.messageCommand == Server.MessagesEnum.putPeace:
+                        pass
+
+                    elif self.messageCommand == Server.MessagesEnum.movePeace:
+                        pass
+
+                    elif self.messageCommand == Server.MessagesEnum.startGame:
+                        Proxy(uri_remoto).start(*self.messageArgs, **self.messageKargs)
+
+                    elif self.messageCommand == Server.MessagesEnum.passTurn:
+                        pass
+
+                    elif self.messageCommand == Server.MessagesEnum.restartGame:
+                        Proxy(uri_remoto).reset(*self.messageArgs, **self.messageKargs)
+
+                    elif self.messageCommand == Server.MessagesEnum.giveUp:
+                        Proxy(uri_remoto).give_up(*self.messageArgs, **self.messageKargs)
+
+                except Exception as e:
+                    print(e)
+
+                self.messageCommand = Server.MessagesEnum.noMessage
+                self.messageArgs    = ()
+                self.messageKargs   = {}
+
+
+def iniciar_servidor():
+    interface: Interface = Interface()
+
+    daemon = Daemon()
+    ns = locate_ns(port=9090)
+
+    objeto = interface
+    uri = daemon.register(objeto)
+    ns.register("2", uri)
+
+    print("[Servidor] Registrado como '2'")
+    daemon.requestLoop()
+
+
+
 def main():
-    game: Game = Game()
+    global game
+    global server
+
+    game   = Game()
+    server = Server()
+
+    thread_servidor = threading.Thread(target=iniciar_servidor, daemon=True)
+    thread_servidor.start()
+
+    thread_client = threading.Thread(target=server.run, daemon=True)
+    thread_client.start()
+
+    time.sleep(2)
 
     game.run_game()
 
@@ -386,5 +541,3 @@ def main():
 
 if __name__=='__main__':
     main()
-
-
