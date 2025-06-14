@@ -42,6 +42,8 @@ BLACK = (25, 25, 25)
 BG_COLOR = (0x36, 0x38, 0x6B)
 PLAYER_COLORS = [(0x50, 0x96, 0x32), (0xEB, 0x49, 0x00), WHITE]  # Azul e vermelho
 BTN_COLORS = (0x7c, 0x7F, 0xEA)
+PLAYER_ID   = 0
+OPPONENT_ID = 1
 
 pygame.init()
 game  : Game
@@ -224,6 +226,8 @@ class Board:
         self.pieces_placed        :List[int] = [0, 0]
         self.selected_piece      :List[int] = [-1, -1]
 
+        self.font: Font = pygame.font.SysFont("Arial", 18)
+
         self.board: List[List[int]] = [[-1 for _ in range(self.board_size)] for _ in range(self.board_size)]
 
         self.center :tuple[int, int] = (board_size // 2, board_size // 2)
@@ -231,6 +235,17 @@ class Board:
         self.board_background_rect :RectType = pygame.Rect(self.left_margin, self.top_margin,
                                                            self.board_size*self.square_quant_pixels,
                                                            self.board_size*self.square_quant_pixels)
+
+        points_size = self.window.get_height() - self.top_margin - self.board_size*self.square_quant_pixels - 10 - self.top_margin
+
+        self.player_points_rect = pygame.Rect(self.left_margin,
+                                              self.top_margin + self.board_size*self.square_quant_pixels + 10,
+                                              points_size, points_size)
+
+        self.opponent_points_rect = pygame.Rect(self.left_margin + points_size + 140,
+                                                self.top_margin + self.board_size * self.square_quant_pixels + 10,
+                                                points_size, points_size)
+
 
 
     def draw_board(self, board_color: tuple[int, int, int], players: List[Player]):
@@ -252,6 +267,24 @@ class Board:
                     if self.selected_piece == [row, col]:
                         color = color[1] + 50
                     pygame.draw.circle(self.window, color, rect.center, self.square_quant_pixels // 3)
+
+
+                draw_any_rect_with_text(self.window, self.font, players[PLAYER_ID].color, self.player_points_rect,
+                                        str(players[PLAYER_ID].points) )
+
+                btn_text = self.font.render("player", True, BLACK)
+
+                self.window.blit(btn_text, (self.player_points_rect.x + self.player_points_rect.width + 10,
+                                 self.player_points_rect.centery - self.font.get_height() / 2))
+
+
+                draw_any_rect_with_text(self.window, self.font, players[OPPONENT_ID].color, self.opponent_points_rect,
+                                        str(players[OPPONENT_ID].points) )
+
+                btn_text = self.font.render("oponente", True, BLACK)
+
+                self.window.blit(btn_text, (self.opponent_points_rect.x + self.opponent_points_rect.width + 10,
+                                 self.opponent_points_rect.centery - self.font.get_height() / 2))
 
 
 
@@ -289,7 +322,7 @@ class Window:
         GIVE_UP_BTN = 2
         START_BTN   = 3
 
-    def update_window(self, board_color:tuple[int, int, int], players: List[Player]):
+    def update_window(self, board_color: tuple[int, int, int], players: List[Player]):
         self.window.fill(BG_COLOR)
         self.board.draw_board(board_color, players)
         self.chat.draw_chat()
@@ -300,7 +333,7 @@ class Window:
 @expose
 class Interface:
     @staticmethod
-    def start(sistem_player: int = 1):
+    def start(sistem_player: int = 0):
         global game
         game.start(sistem_player)
 
@@ -331,7 +364,7 @@ class Game:
         self.sistem_player  :int = 0
         self.max_pieces     :int = 12
 
-        self.players :List[Player] = [Player((0x50, 0x96, 0x32)), Player((0xEB, 0x49, 0x00))]
+        self.players :List[Player] = [Player(WHITE), Player(WHITE)]
 
         self.window_width  :int = 1000
         self.window_height :int = 600
@@ -358,22 +391,29 @@ class Game:
             self.game_state += 1
             self.current_player = 0
             self.sistem_player  = sistem_player
+            self.players[PLAYER_ID].color = PLAYER_COLORS[sistem_player]
+            self.players[OPPONENT_ID].color = PLAYER_COLORS[1 - sistem_player]
 
 
-    def give_up(self, sistem_player:int = None):
-        print("give_up")
+    def give_up(self, sistem_player:int = PLAYER_ID):
+        print(f"give_up({sistem_player})")
 
         global server
-        if sistem_player is None:
-            sistem_player = self.sistem_player
+        if sistem_player == PLAYER_ID:
             server.messageCommand = Server.MessagesEnum.giveUp
+            server.messageArgs = (OPPONENT_ID, )
 
         self.players[1 - sistem_player].points += 1
         self.reset(False)
 
+
     def add_chat_messages(self, texto:str, origin:str="player"):
         print("add_chat_messages")
         self.window.chat.add_chat_messages(texto, origin)
+
+        if origin == "player":
+            server.messageCommand = Server.MessagesEnum.playerMessages
+            server.messageArgs = (texto, "oponente")
 
 
     def reset(self, init:bool = False):
@@ -389,6 +429,7 @@ class Game:
 
     def cancel(self):
         pass
+
 
     def handle_placement(self, pos) -> bool:
         x, y = pos
@@ -407,15 +448,17 @@ class Game:
 
         return False
 
+
     def show_screen(self):
         if self.game_state == -1:
             board_color = BLACK
         else:
-            board_color = self.players[self.current_player].color
+            board_color = PLAYER_COLORS[self.current_player]
 
         self.clock.tick(60)
         self.window.update_window(board_color, self.players)
         pygame.display.flip()
+
 
     def run_game(self):
         self.reset(True)
@@ -445,22 +488,23 @@ class Game:
 
 
 
-
 class Server:
     class MessagesEnum(Enum):
-        noMessage = -1
+        noMessage      = -1
         playerMessages = 0
-        putPeace = 1
-        movePeace = 2
-        startGame = 3
-        passTurn = 4
-        restartGame = 5
-        giveUp = 6
+        putPeace       = 1
+        movePeace      = 2
+        startGame      = 3
+        passTurn       = 4
+        restartGame    = 5
+        giveUp         = 6
+
 
     def __init__(self):
         self.messageCommand : Server.MessagesEnum = Server.MessagesEnum.noMessage
         self.messageArgs    : tuple = ()
         self.messageKargs   : dict = {}
+
 
     def run(self):
         while True:
@@ -503,6 +547,7 @@ class Server:
                 self.messageCommand = Server.MessagesEnum.noMessage
                 self.messageArgs    = ()
                 self.messageKargs   = {}
+
 
 
 def iniciar_servidor():
