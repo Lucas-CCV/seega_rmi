@@ -205,6 +205,28 @@ class Chat:
                 # se a quantidade de texto for maior que o maximo de mensagens no chat, tira a primeira da fila
                 self.chat_messages.pop(0)
 
+    def get_chat_input(self, event) -> str:
+        value: str
+
+        # verifica se algo do teclado foi precionado
+        if event.type == pygame.KEYDOWN:
+            # se for um backspace apaga da ultima posição
+            if event.key == pygame.K_BACKSPACE:
+                self.input_text = self.input_text[:-1]
+
+            # return salva o texto
+            elif event.key == pygame.K_RETURN:
+                if self.input_text.strip():
+                    value = self.input_text
+                    self.input_text = ""
+                    return value
+            else:
+                # empede do usuário escrever algo com mais de 200 chars
+                if len(self.input_text) < 200:
+                    self.input_text += event.unicode
+
+        return ""
+
 
 
 class Player:
@@ -485,6 +507,10 @@ class Game:
                             if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
                                 print("aqui 2")
                                 self.game_state = 1
+                else:
+                    chat_text = self.window.chat.get_chat_input(event)
+                    if chat_text != "":
+                        self.add_chat_messages(chat_text, "player")
 
 
 
