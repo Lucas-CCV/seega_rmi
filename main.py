@@ -1,13 +1,8 @@
 from __future__ import annotations
-from logging import exception
-from typing import List, Callable, Tuple
+from typing import List, Callable
 
-import sys
 from enum import Enum
-import socket
 import threading
-
-from nltk.downloader import update
 
 from pygame.rect import RectType
 from pygame.time import Clock
@@ -285,7 +280,7 @@ class Board:
                 pygame.draw.rect(self.window, board_color, rect, 1)
 
                 if self.board[row][col] != -1:
-                    color = players[self.board[row][col]].color
+                    color = PLAYER_COLORS[self.board[row][col]]
                     if self.selected_piece == [row, col]:
                         color = color[1] + 50
                     pygame.draw.circle(self.window, color, rect.center, self.square_quant_pixels // 3)
@@ -359,20 +354,34 @@ class Interface:
         global game
         game.start(sistem_player)
 
+
     @staticmethod
     def give_up(sistem_player:int = None):
         global game
         game.give_up(sistem_player)
+
 
     @staticmethod
     def add_chat_messages(texto:str, origin:str="player"):
         global game
         game.add_chat_messages(texto, origin)
 
+
     @staticmethod
     def reset(init:bool = False):
         global game
         game.reset(init)
+
+
+    @staticmethod
+    def put_peace(row: int, col: int, send: bool = True):
+        global game
+        game.put_peace(row, col, send)
+
+    @staticmethod
+    def pass_turn(send: bool = True):
+        global game
+        game.pass_turn(send)
 
 
 
@@ -406,8 +415,7 @@ class Game:
 
         global server
         if sistem_player == 0:
-            server.messageCommand = Server.MessagesEnum.startGame
-            server.messageArgs    = (1, )
+            server.send_message(Server.MessagesEnum.startGame, (1, ))
 
         if self.game_state == -1:
             self.game_state += 1
@@ -422,8 +430,7 @@ class Game:
 
         global server
         if sistem_player == PLAYER_ID:
-            server.messageCommand = Server.MessagesEnum.giveUp
-            server.messageArgs = (OPPONENT_ID, )
+            server.send_message(Server.MessagesEnum.giveUp, (OPPONENT_ID, ))
 
         self.players[1 - sistem_player].points += 1
         self.reset(False)
@@ -434,8 +441,7 @@ class Game:
         self.window.chat.add_chat_messages(texto, origin)
 
         if origin == "player":
-            server.messageCommand = Server.MessagesEnum.playerMessages
-            server.messageArgs = (texto, "oponente")
+            server.send_message(Server.MessagesEnum.playerMessages, (texto, "oponente"))
 
 
     def reset(self, init:bool = False):
@@ -447,6 +453,22 @@ class Game:
                 player.points = 0
 
         self.add_chat_messages(f"clique em start para começar.", "sistema")
+
+    def put_peace(self, row: int, col: int, send: bool = True):
+        print(f"put_peace({row}, {col}, {send})")
+        self.window.board.board[row][col] = self.current_player
+        self.window.board.pieces_placed[self.current_player] += 1
+
+        if send:
+            server.send_message(Server.MessagesEnum.putPeace, (row, col, False))
+
+
+    def pass_turn(self, send: bool = True):
+        print(f"pass_turn({send})")
+        self.current_player = 1 - self.current_player
+
+        if send:
+            server.send_message(Server.MessagesEnum.passTurn, (False, ))
 
 
     def cancel(self):
@@ -461,11 +483,11 @@ class Game:
         if 0 <= row < self.window.board.board_size and 0 <= col < self.window.board.board_size:
             if (row, col) == self.window.board.center:
                 return False
-            if (self.window.board.board[row][col] is None and
+
+            if (self.window.board.board[row][col] == -1 and
                 self.window.board.pieces_placed[self.current_player] < self.max_pieces):
 
-                self.window.board.board[row][col] = self.current_player
-                self.window.board.pieces_placed[self.current_player] += 1
+                self.put_peace(row, col)
                 return True
 
         return False
@@ -494,15 +516,12 @@ class Game:
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     position = pygame.mouse.get_pos()
-                    print(position)
                     if self.window.BTNPressed(self.window.buttons.verify_btn(position=position)) == self.window.BTNPressed.NO_BTN:
-                        print("bo button")
                         if self.game_state == 0:
-                            print("game state == 0")
                             if (self.current_player == self.sistem_player and self.handle_placement(position) and
                                 self.window.board.pieces_placed[self.current_player] % 2 == 0):
-                                print("aqui")
-                                self.current_player = 1 - self.current_player
+                                time.sleep(0.1)
+                                self.pass_turn()
 
                             if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
                                 print("aqui 2")
@@ -524,12 +543,24 @@ class Server:
         passTurn       = 4
         restartGame    = 5
         giveUp         = 6
-
+        notOccupied    = 7
 
     def __init__(self):
         self.messageCommand : Server.MessagesEnum = Server.MessagesEnum.noMessage
         self.messageArgs    : tuple = ()
         self.messageKargs   : dict = {}
+
+        self.semaforo = threading.Semaphore(0)
+        self.semaforo1 = threading.Semaphore(1)
+
+
+    def send_message(self, msg_command: Server.MessagesEnum, msg_args: tuple = (), msg_kargs = None):
+        self.semaforo1.acquire()
+        self.messageCommand = msg_command
+        self.messageArgs    = msg_args
+        self.messageKargs   = msg_kargs if msg_kargs is not None else {}
+        self.semaforo1.release()
+        self.semaforo.release()
 
 
     def run(self):
@@ -543,14 +574,15 @@ class Server:
                 print(f"name server connect:  {e}")
 
         while True:
-            time.sleep(0.5)
+            self.semaforo.acquire()
+            self.semaforo1.acquire()
             if self.messageCommand != Server.MessagesEnum.noMessage:
-                try:
+                # try:
                     if self.messageCommand == Server.MessagesEnum.playerMessages:
                         Proxy(uri_remoto).add_chat_messages(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.putPeace:
-                        pass
+                        Proxy(uri_remoto).put_peace(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.movePeace:
                         pass
@@ -559,7 +591,7 @@ class Server:
                         Proxy(uri_remoto).start(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.passTurn:
-                        pass
+                        Proxy(uri_remoto).pass_turn(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.restartGame:
                         Proxy(uri_remoto).reset(*self.messageArgs, **self.messageKargs)
@@ -567,13 +599,17 @@ class Server:
                     elif self.messageCommand == Server.MessagesEnum.giveUp:
                         Proxy(uri_remoto).give_up(*self.messageArgs, **self.messageKargs)
 
-                except Exception as e:
-                    print(e)
+                    elif self.messageCommand == Server.MessagesEnum.notOccupied:
+                        Proxy(uri_remoto).not_occupied(*self.messageArgs, **self.messageKargs)
 
-                self.messageCommand = Server.MessagesEnum.noMessage
-                self.messageArgs    = ()
-                self.messageKargs   = {}
+                # except Exception as e:
+                #     print(e)
 
+                    self.messageCommand = Server.MessagesEnum.noMessage
+                    self.messageArgs    = ()
+                    self.messageKargs   = {}
+
+                    self.semaforo1.release()
 
 
 def iniciar_servidor():
