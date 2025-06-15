@@ -445,21 +445,81 @@ class Game:
         self.clock:Clock = pygame.time.Clock()
         self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
+        self.client_id = self.get_id("qual o identificador do cliente:")
+        self.server_id = self.get_id("qual o identificador do servidor:")
+
+        thread_servidor = threading.Thread(target=self.register, daemon=True)
+        thread_servidor.start()
+
+        self.connect()
+
+
+    def get_id(self, input_string: str) -> str:
+        text: str = ""
+
+        while self.run and text == "":
+            self.add_chat_messages(input_string, "sistema")
+            while self.run and text == "":
+                self.show_screen()
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.run = False
+
+                    text = self.window.chat.get_chat_input(event)
+
+            self.add_chat_messages(f"identificador selecionada {text}", "sistema")
+
+        return text
+
+
+    def verify_connection(self) -> bool:
+        if self.enemy_game is None:
+            self.add_chat_messages("nenhum jogador conectado", "sistema")
+            return False
+        return True
+
+
+    def connect(self):
+        self.add_chat_messages("tentando se conectar ao servidor", "sistema")
+
         while True:
-            time.sleep(1)
+            self.show_screen()
             try:
                 ns = locate_ns(port=9090)
-                uri_remoto = ns.lookup("1")
+                uri_remoto = ns.lookup(self.server_id)
                 self.enemy_game: Interface = Proxy(uri_remoto)
                 break
             except Exception as e:
                 print(f"name server connect:  {e}")
 
 
+    def register(self):
+        interface: Interface = Interface()
+
+        daemon = Daemon()
+
+        while True:
+            try:
+                ns = locate_ns(port=9090)
+
+                objeto = interface
+                uri = daemon.register(objeto)
+                ns.register(self.client_id, uri)
+                break
+            except Exception as e:
+                print(e)
+
+            time.sleep(1)
+
+        print(f"[Servidor] Registrado como {self.client_id} ao servidor")
+        daemon.requestLoop()
+
+
     def start(self,  sistem_player: int = 0) -> Window.BTNPressed:
         print(f"start({sistem_player})")
+        if not self.verify_connection():
+            return Window.BTNPressed.NO_BTN
 
-        global server
         if sistem_player == 0:
             self.enemy_game.start(1)
 
@@ -475,8 +535,9 @@ class Game:
 
     def give_up(self, sistem_player:int = PLAYER_ID) -> Window.BTNPressed:
         print(f"give_up({sistem_player})")
+        if not self.verify_connection():
+            return Window.BTNPressed.NO_BTN
 
-        global server
         if sistem_player == PLAYER_ID:
             self.enemy_game.give_up(OPPONENT_ID)
 
@@ -488,14 +549,20 @@ class Game:
 
     def add_chat_messages(self, texto:str, origin:str="player"):
         print("add_chat_messages")
+        if origin == "player":
+            if not self.verify_connection():
+                return
+            
+            self.enemy_game.add_chat_messages(texto, "oponente")
+
         self.window.chat.add_chat_messages(texto, origin)
 
-        if origin == "player":
-            self.enemy_game.add_chat_messages(texto, "oponente")
 
 
     def reset(self, init:bool = False, send: bool = True) -> Window.BTNPressed:
         print(f"reset({init}, {send})")
+        if not init and not self.verify_connection():
+            return Window.BTNPressed.NO_BTN
 
         self.window.board.board = [[-1 for _ in range(self.window.board.board_size)] for _ in range(self.window.board.board_size)]
 
@@ -522,6 +589,9 @@ class Game:
 
     def put_peace(self, row: int, col: int, send: bool = True):
         print(f"put_peace({row}, {col}, {send})")
+        if not self.verify_connection():
+            return
+
         self.window.board.board[row][col] = self.current_player
         self.window.board.pieces_placed[self.current_player] += 1
 
@@ -539,6 +609,8 @@ class Game:
 
     def pass_turn(self, send: bool = True):
         print(f"pass_turn({send})")
+        if not self.verify_connection():
+            return
 
         if send:
             self.enemy_game.pass_turn(False, )
@@ -692,27 +764,8 @@ class Game:
 
 
 
-def iniciar_servidor():
-    interface: Interface = Interface()
-
-    daemon = Daemon()
-    ns = locate_ns(port=9090)
-
-    objeto = interface
-    uri = daemon.register(objeto)
-    ns.register("2", uri)
-
-    print("[Servidor] Registrado como '2'")
-    daemon.requestLoop()
-
-
-
 def main():
     global game
-
-    thread_servidor = threading.Thread(target=iniciar_servidor, daemon=True)
-    thread_servidor.start()
-
     game   = Game()
     game.run_game()
 
