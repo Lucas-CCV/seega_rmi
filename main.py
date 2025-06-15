@@ -388,9 +388,9 @@ class Interface:
 
 
     @staticmethod
-    def reset(init:bool = False):
+    def reset(init:bool = False, send: bool = True):
         global game
-        game.reset(init)
+        game.reset(init, send)
 
 
     @staticmethod
@@ -474,7 +474,7 @@ class Game:
             server.send_message(Server.MessagesEnum.giveUp, (OPPONENT_ID, ))
 
         self.players[1 - sistem_player].points += 1
-        self.reset(False)
+        self.reset(False, False)
 
         return Window.BTNPressed.GIVE_UP_BTN
 
@@ -488,15 +488,28 @@ class Game:
             server.send_message(Server.MessagesEnum.playerMessages, (texto, "oponente"))
 
 
-    def reset(self, init:bool = False) -> Window.BTNPressed:
-        print("reset")
-        # self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
+    def reset(self, init:bool = False, send: bool = True) -> Window.BTNPressed:
+        print(f"reset({init}, {send})")
 
-        if init:
-            for player in self.players:
+        self.window.board.board = [[-1 for _ in range(self.window.board.board_size)] for _ in range(self.window.board.board_size)]
+
+        self.current_player = 0
+        self.sistem_player = -1
+        self.game_state = -1
+        self.window.board.pieces_placed = [0, 0]
+        self.window.chat.chat_messages = []
+        self.window.chat.input_text = ""
+        self.window.board.selected_piece = [-1, -1]
+
+        for player in self.players:
+            if init:
                 player.points = 0
+            player.color = PLAYER_COLORS[-1]
 
         self.add_chat_messages(f"clique em start para começar.", "sistema")
+
+        if send:
+            server.send_message(Server.MessagesEnum.restartGame, (init,  False))
 
         return Window.BTNPressed.RESTART_BTN
 
@@ -632,7 +645,7 @@ class Game:
 
 
     def run_game(self):
-        self.reset(True)
+        self.reset(True, False)
 
         while self.run:
             self.show_screen()
