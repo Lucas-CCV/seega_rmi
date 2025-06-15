@@ -89,8 +89,8 @@ class Button:
         draw_any_rect_with_text(self.window, self.font, self.color, self.rect, self.text)
 
 
-    def click(self):
-        self.function()
+    def click(self) -> Window.BTNPressed:
+        return self.function()
 
 
 
@@ -110,13 +110,12 @@ class Buttons:
             left_margin_now += font_size[0]+15
 
 
-    def verify_btn(self, position=pygame.mouse.get_pos()) -> int:
+    def verify_btn(self, position=pygame.mouse.get_pos()) -> Window.BTNPressed:
         for index in range(len(self.buttons)):
             if self.buttons[index].rect.collidepoint(position):
-                self.buttons[index].click()
-                return index
+                return self.buttons[index].click()
 
-        return -1
+        return Window.BTNPressed.NO_BTN
 
 
     def draw_btns(self):
@@ -450,7 +449,7 @@ class Game:
         self.enemy_game = enemy_game
 
 
-    def start(self,  sistem_player: int = 0):
+    def start(self,  sistem_player: int = 0) -> Window.BTNPressed:
         print(f"start({sistem_player})")
 
         global server
@@ -464,8 +463,10 @@ class Game:
             self.players[PLAYER_ID].color = PLAYER_COLORS[sistem_player]
             self.players[OPPONENT_ID].color = PLAYER_COLORS[1 - sistem_player]
 
+        return Window.BTNPressed.START_BTN
 
-    def give_up(self, sistem_player:int = PLAYER_ID):
+
+    def give_up(self, sistem_player:int = PLAYER_ID) -> Window.BTNPressed:
         print(f"give_up({sistem_player})")
 
         global server
@@ -474,6 +475,9 @@ class Game:
 
         self.players[1 - sistem_player].points += 1
         self.reset(False)
+
+        return Window.BTNPressed.GIVE_UP_BTN
+
 
 
     def add_chat_messages(self, texto:str, origin:str="player"):
@@ -484,7 +488,7 @@ class Game:
             server.send_message(Server.MessagesEnum.playerMessages, (texto, "oponente"))
 
 
-    def reset(self, init:bool = False):
+    def reset(self, init:bool = False) -> Window.BTNPressed:
         print("reset")
         # self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
@@ -493,6 +497,9 @@ class Game:
                 player.points = 0
 
         self.add_chat_messages(f"clique em start para começar.", "sistema")
+
+        return Window.BTNPressed.RESTART_BTN
+
 
     def put_peace(self, row: int, col: int, send: bool = True):
         print(f"put_peace({row}, {col}, {send})")
@@ -524,8 +531,12 @@ class Game:
         return self.window.board.remove_piece(row_end, col_end, self.current_player)
 
 
-    def cancel(self):
+    def cancel(self) -> Window.BTNPressed:
+        print("cancel->canceled")
         self.window.board.selected_piece = [-1, -1]
+
+        return Window.BTNPressed.CANCEL_BTN
+
 
 
     def handle_placement(self, pos) -> bool:
@@ -575,6 +586,7 @@ class Game:
 
                             if self.window.buttons.verify_btn(position=position) == self.window.BTNPressed.CANCEL_BTN:
                                 if first_play:
+                                    print("players_turn->canceled")
                                     return Game.PlayersTurnStatus.CANCEL
                                 return Game.PlayersTurnStatus.NEXT_PLAYER
 
