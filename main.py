@@ -28,7 +28,6 @@ OPPONENT_ID = 1
 
 pygame.init()
 game  : Game
-server: Server
 
 
 
@@ -446,9 +445,15 @@ class Game:
         self.clock:Clock = pygame.time.Clock()
         self.window: Window = Window(self.window_width, self.window_height,self.btn_text_list,self.btn_function_list)
 
-
-    def set_enemy_game(self, enemy_game):
-        self.enemy_game = enemy_game
+        while True:
+            time.sleep(1)
+            try:
+                ns = locate_ns(port=9090)
+                uri_remoto = ns.lookup("1")
+                self.enemy_game: Interface = Proxy(uri_remoto)
+                break
+            except Exception as e:
+                print(f"name server connect:  {e}")
 
 
     def start(self,  sistem_player: int = 0) -> Window.BTNPressed:
@@ -456,7 +461,7 @@ class Game:
 
         global server
         if sistem_player == 0:
-            server.send_message(Server.MessagesEnum.startGame, (1, ))
+            self.enemy_game.start(1)
 
         if self.game_state == -1:
             self.game_state += 1
@@ -473,7 +478,7 @@ class Game:
 
         global server
         if sistem_player == PLAYER_ID:
-            server.send_message(Server.MessagesEnum.giveUp, (OPPONENT_ID, ))
+            self.enemy_game.give_up(OPPONENT_ID)
 
         self.players[1 - sistem_player].points += 1
         self.reset(False, False)
@@ -486,7 +491,7 @@ class Game:
         self.window.chat.add_chat_messages(texto, origin)
 
         if origin == "player":
-            server.send_message(Server.MessagesEnum.playerMessages, (texto, "oponente"))
+            self.enemy_game.add_chat_messages(texto, "oponente")
 
 
     def reset(self, init:bool = False, send: bool = True) -> Window.BTNPressed:
@@ -510,7 +515,7 @@ class Game:
         self.add_chat_messages(f"clique em start para começar.", "sistema")
 
         if send:
-            server.send_message(Server.MessagesEnum.restartGame, (init,  False))
+            self.enemy_game.reset(init,  False)
 
         return Window.BTNPressed.RESTART_BTN
 
@@ -521,7 +526,7 @@ class Game:
         self.window.board.pieces_placed[self.current_player] += 1
 
         if send:
-            server.send_message(Server.MessagesEnum.putPeace, (row, col, False))
+            self.enemy_game.put_peace(row, col, False)
 
 
     def check_victory(self) -> bool:
@@ -536,7 +541,7 @@ class Game:
         print(f"pass_turn({send})")
 
         if send:
-            server.send_message(Server.MessagesEnum.passTurn, (False, ))
+            self.enemy_game.pass_turn(False, )
         else:
             self.check_victory()
 
@@ -546,13 +551,12 @@ class Game:
             self.game_state = 1
 
 
-
     def move_peace(self, row_init: int, col_init: int, row_end: int, col_end: int, send: bool = True) -> bool:
         self.window.board.board[row_init][col_init] = -1
         self.window.board.board[row_end][col_end] = self.current_player
 
         if send:
-            server.send_message(Server.MessagesEnum.movePeace, (row_init, col_init, row_end, col_end, False))
+            self.enemy_game.move_peace(row_init, col_init, row_end, col_end, False)
 
         return self.window.board.remove_piece(row_end, col_end, self.current_player)
 
@@ -688,86 +692,6 @@ class Game:
 
 
 
-class Server:
-    class MessagesEnum(Enum):
-        noMessage      = -1
-        playerMessages = 0
-        putPeace       = 1
-        movePeace      = 2
-        startGame      = 3
-        passTurn       = 4
-        restartGame    = 5
-        giveUp         = 6
-        notOccupied    = 7
-
-
-    def __init__(self):
-        self.messageCommand : Server.MessagesEnum = Server.MessagesEnum.noMessage
-        self.messageArgs    : tuple = ()
-        self.messageKargs   : dict = {}
-
-        self.semaforo = threading.Semaphore(0)
-        self.semaforo1 = threading.Semaphore(1)
-
-
-    def send_message(self, msg_command: Server.MessagesEnum, msg_args: tuple = (), msg_kargs = None):
-        self.semaforo1.acquire()
-        self.messageCommand = msg_command
-        self.messageArgs    = msg_args
-        self.messageKargs   = msg_kargs if msg_kargs is not None else {}
-        self.semaforo1.release()
-        self.semaforo.release()
-
-
-    def run(self):
-        while True:
-            time.sleep(1)
-            try:
-                ns = locate_ns(port=9090)
-                uri_remoto = ns.lookup("1")
-                break
-            except Exception as e:
-                print(f"name server connect:  {e}")
-
-        while True:
-            self.semaforo.acquire()
-            self.semaforo1.acquire()
-            if self.messageCommand != Server.MessagesEnum.noMessage:
-                try:
-                    if self.messageCommand == Server.MessagesEnum.playerMessages:
-                        Proxy(uri_remoto).add_chat_messages(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.putPeace:
-                        Proxy(uri_remoto).put_peace(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.movePeace:
-                        Proxy(uri_remoto).move_peace(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.startGame:
-                        Proxy(uri_remoto).start(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.passTurn:
-                        Proxy(uri_remoto).pass_turn(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.restartGame:
-                        Proxy(uri_remoto).reset(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.giveUp:
-                        Proxy(uri_remoto).give_up(*self.messageArgs, **self.messageKargs)
-
-                    elif self.messageCommand == Server.MessagesEnum.notOccupied:
-                        Proxy(uri_remoto).not_occupied(*self.messageArgs, **self.messageKargs)
-
-                except Exception as e:
-                    print(e)
-
-                self.messageCommand = Server.MessagesEnum.noMessage
-                self.messageArgs    = ()
-                self.messageKargs   = {}
-
-                self.semaforo1.release()
-
-
 def iniciar_servidor():
     interface: Interface = Interface()
 
@@ -785,17 +709,11 @@ def iniciar_servidor():
 
 def main():
     global game
-    global server
-
-    game   = Game()
-    server = Server()
 
     thread_servidor = threading.Thread(target=iniciar_servidor, daemon=True)
     thread_servidor.start()
 
-    thread_client = threading.Thread(target=server.run, daemon=True)
-    thread_client.start()
-
+    game   = Game()
     game.run_game()
 
 
