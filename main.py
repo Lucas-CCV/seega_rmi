@@ -15,23 +15,7 @@ from Pyro5.api import expose, Daemon, locate_ns, Proxy
 import time
 
 
-WINDOW_WIDTH  = 1000
-WINDOW_HEIGHT = 600
-# CHAT_AREA_X   = LEFT_MARGIN + BOARD_WIDTH + 20
-# CHAT_AREA_WIDTH  = WINDOW_WIDTH - CHAT_AREA_X - 20
-#
-# RESTART_BTN_RECT = pygame.Rect(CHAT_AREA_X, TOP_MARGIN + BOARD_HEIGHT + 10, 160, 30)
-# CANCEL_BTN_RECT  = pygame.Rect(CHAT_AREA_X + 170, TOP_MARGIN + BOARD_HEIGHT + 10, 100, 30)
-# START_BTN_RECT   = pygame.Rect(CHAT_AREA_X + 280, TOP_MARGIN + BOARD_HEIGHT + 10, 60, 30)
-# GIVE_UP_BTN_RECT = pygame.Rect(CHAT_AREA_X + 350, TOP_MARGIN + BOARD_HEIGHT + 10, 90, 30)
-#
-# POINTS_SIZE = WINDOW_HEIGHT - TOP_MARGIN - BOARD_HEIGHT - 10 - TOP_MARGIN
-# PLAYER_POINTS_RECT   = pygame.Rect(LEFT_MARGIN, TOP_MARGIN + BOARD_HEIGHT + 10, POINTS_SIZE, POINTS_SIZE)
-# OPPONENT_POINTS_RECT = pygame.Rect(LEFT_MARGIN + POINTS_SIZE + 140, TOP_MARGIN + BOARD_HEIGHT + 10, POINTS_SIZE, POINTS_SIZE)
-#
-# BOARD_BACKGROUND_RECT = pygame.Rect(LEFT_MARGIN, TOP_MARGIN, ROWS*SQUARE_SIZE, COLS*SQUARE_SIZE)
 
-# Cores
 WHITE = (230, 230, 230)
 BLACK = (25, 25, 25)
 BG_COLOR = (0x36, 0x38, 0x6B)
@@ -39,6 +23,7 @@ PLAYER_COLORS = [(0x50, 0x96, 0x32), (0xEB, 0x49, 0x00), WHITE]  # Azul e vermel
 BTN_COLORS = (0x7c, 0x7F, 0xEA)
 PLAYER_ID   = 0
 OPPONENT_ID = 1
+
 
 pygame.init()
 game  : Game
@@ -304,6 +289,40 @@ class Board:
                                  self.opponent_points_rect.centery - self.font.get_height() / 2))
 
 
+    def get_board_position(self, pos):
+        x, y = pos
+        col_init = (x - self.left_margin) // self.square_quant_pixels
+        row_init = (y - self.top_margin) // self.square_quant_pixels
+
+        return col_init, row_init
+
+    def remove_piece(self, row, col, current_player) -> bool:
+        print(f"remove({row}, {col}, {current_player})")
+        removed = False
+        test = [-1, 1]
+
+        for i in test:
+            if (0 <= row+i < self.board_size and 0 <= row+i*2 < self.board_size and
+                not (row+i == self.center[0] and col == self.center[1]) and self.board[row+i][col] != -1 and
+                self.board[row+i][col] != current_player and self.board[row+i*2][col] == current_player):
+
+                self.board[row+i][col] = -1
+                self.pieces_placed[current_player] -= 1
+                removed = True
+
+            if (0 <= col+i < self.board_size and 0 <= col+i*2 < self.board_size and
+                not (row == self.center[0] and col+i == self.center[1]) and self.board[row][col+i] != -1 and
+                self.board[row][col+i] != current_player and self.board[row][col+i*2] == current_player):
+
+                self.board[row][col+i] = -1
+                self.pieces_placed[current_player] -= 1
+                removed = True
+
+            print("\n\n\n\n")
+
+        return removed
+
+
 
 class Window:
     def __init__(self, width: int, height: int, btn_text_list :List[str],btn_function_list: List[Callable]):
@@ -332,12 +351,14 @@ class Window:
         self.buttons : Buttons = Buttons(self.window, 4, btn_text_list, btn_function_list,
                                          chat_left_margin, buttons_top_margin, self.general_font)
 
+
     class BTNPressed(Enum):
         NO_BTN      = -1
         RESTART_BTN = 0
         CANCEL_BTN  = 1
         GIVE_UP_BTN = 2
         START_BTN   = 3
+
 
     def update_window(self, board_color: tuple[int, int, int], players: List[Player]):
         self.window.fill(BG_COLOR)
@@ -378,14 +399,33 @@ class Interface:
         global game
         game.put_peace(row, col, send)
 
+
     @staticmethod
     def pass_turn(send: bool = True):
         global game
         game.pass_turn(send)
 
 
+    @staticmethod
+    def move_peace(row_init: int, col_init: int, row_end: int, col_end: int, send: bool = True):
+        global game
+        game.move_peace(row_init, col_init, row_end, col_end, send)
+
+
 
 class Game:
+    class PlayersTurnStatus(Enum):
+        ERROR                = 0
+        MOVED_WITH_REMOVE    = 1
+        MOVED_WITHOUT_REMOVE = 2
+        INVALID_MOVE         = 3
+        OUT_OF_BOUNDS        = 4
+        OPPONENTS_PIECE      = 5
+        VOID_SPACE           = 6
+        WON                  = 7
+        CANCEL               = 8
+        NEXT_PLAYER          = 9
+    
     def __init__(self):
         self.enemy_game            = None
         self.run            :bool  = True
@@ -467,18 +507,29 @@ class Game:
         print(f"pass_turn({send})")
         self.current_player = 1 - self.current_player
 
+        if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
+            self.game_state = 1
+
         if send:
             server.send_message(Server.MessagesEnum.passTurn, (False, ))
 
 
+    def move_peace(self, row_init: int, col_init: int, row_end: int, col_end: int, send: bool = True) -> bool:
+        self.window.board.board[row_init][col_init] = -1
+        self.window.board.board[row_end][col_end] = self.current_player
+
+        if send:
+            server.send_message(Server.MessagesEnum.movePeace, (row_init, col_init, row_end, col_end, False))
+
+        return self.window.board.remove_piece(row_end, col_end, self.current_player)
+
+
     def cancel(self):
-        pass
+        self.window.board.selected_piece = [-1, -1]
 
 
     def handle_placement(self, pos) -> bool:
-        x, y = pos
-        col = (x - self.window.board.left_margin) // self.window.board.square_quant_pixels
-        row = (y - self.window.board.top_margin) // self.window.board.square_quant_pixels
+        col, row = self.window.board.get_board_position(pos)
 
         if 0 <= row < self.window.board.board_size and 0 <= col < self.window.board.board_size:
             if (row, col) == self.window.board.center:
@@ -504,6 +555,70 @@ class Game:
         pygame.display.flip()
 
 
+    def players_turn(self, pos) -> Game.PlayersTurnStatus:
+        first_play = True
+
+        col_init, row_init = self.window.board.get_board_position(pos)
+
+        if 0 <= row_init < self.window.board.board_size and 0 <= col_init < self.window.board.board_size:
+            if self.window.board.board[row_init][col_init] == self.current_player:
+                self.window.board.selected_piece = [row_init, col_init]
+                while self.run:
+                    self.show_screen()
+
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            self.run = False
+
+                        if event.type == pygame.MOUSEBUTTONDOWN:
+                            position = pygame.mouse.get_pos()
+
+                            if self.window.buttons.verify_btn(position=position) == self.window.BTNPressed.CANCEL_BTN:
+                                if first_play:
+                                    return Game.PlayersTurnStatus.CANCEL
+                                return Game.PlayersTurnStatus.NEXT_PLAYER
+
+                            else:
+                                col_end, row_end = self.window.board.get_board_position((position[0], position[1]))
+
+                                if (0 <= row_end < self.window.board.board_size and
+                                    0 <= col_end < self.window.board.board_size):
+                                    if (self.window.board.board[row_end][col_end] == -1 and
+                                        (abs(row_init - row_end) + abs(col_init - col_end) == 1)):
+
+                                        self.window.board.board[row_end][col_end]  , self.window.board.board[row_init][col_init] =\
+                                        self.window.board.board[row_init][col_init], self.window.board.board[row_end][col_end]
+
+                                        self.window.board.selected_piece = [row_end, col_end]
+
+                                        if self.move_peace(row_init, col_init, row_end, col_end):
+                                            if self.window.board.pieces_placed[0] == 0 or self.window.board.pieces_placed[1] == 0:
+                                                self.add_chat_messages(f"vitoria do jogador {self.current_player + 1}", "sistema")
+                                                self.players[PLAYER_ID if self.current_player == self.sistem_player else OPPONENT_ID].points += 1
+                                                return Game.PlayersTurnStatus.WON
+
+                                            row_end, row_init = row_init, row_end
+                                            col_end, col_init = col_init, col_end
+                                            first_play = False
+                                            continue
+                                        self.window.board.selected_piece = [-1, -1]
+                                        return Game.PlayersTurnStatus.MOVED_WITHOUT_REMOVE
+
+                return Game.PlayersTurnStatus.ERROR
+
+            elif self.window.board.board[row_init][col_init] is None:
+                self.add_chat_messages("nenhuma peça selecionada", "sistema")
+                return Game.PlayersTurnStatus.VOID_SPACE
+
+            else:
+                self.add_chat_messages("peça do openente selecionada", "sistema")
+                return Game.PlayersTurnStatus.OPPONENTS_PIECE
+
+        else:
+            self.add_chat_messages("fora de area", "sistema")
+            return Game.PlayersTurnStatus.OUT_OF_BOUNDS
+
+
     def run_game(self):
         self.reset(True)
 
@@ -522,10 +637,15 @@ class Game:
                                 self.window.board.pieces_placed[self.current_player] % 2 == 0):
                                 time.sleep(0.1)
                                 self.pass_turn()
+                                
+                        elif self.game_state == 1  and self.current_player == self.sistem_player:
+                                player_turn = self.players_turn(position)
+                                if player_turn in (Game.PlayersTurnStatus.MOVED_WITHOUT_REMOVE, Game.PlayersTurnStatus.WON, Game.PlayersTurnStatus.NEXT_PLAYER):
+                                    self.pass_turn()
+    
+                                elif player_turn == Game.PlayersTurnStatus.CANCEL:
+                                    self.add_chat_messages("peça selecionada cancelada", "sistema")
 
-                            if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
-                                print("aqui 2")
-                                self.game_state = 1
                 else:
                     chat_text = self.window.chat.get_chat_input(event)
                     if chat_text != "":
@@ -585,7 +705,7 @@ class Server:
                         Proxy(uri_remoto).put_peace(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.movePeace:
-                        pass
+                        Proxy(uri_remoto).move_peace(*self.messageArgs, **self.messageKargs)
 
                     elif self.messageCommand == Server.MessagesEnum.startGame:
                         Proxy(uri_remoto).start(*self.messageArgs, **self.messageKargs)
