@@ -25,6 +25,7 @@ PLAYER_ID   = 0
 OPPONENT_ID = 1
 
 
+
 pygame.init()
 game  : Game
 server: Server
@@ -34,9 +35,10 @@ server: Server
 def fit_text_size(text, font, max_width, invert):
     tamanho: int = 0
 
-    # enquanto o tamanho que cabe do texto não tiver chegado no último caractere e o tamanho do texto não tiver passado o max_width
-    while tamanho < len(text) and font.size((text[-(tamanho + 1):]) if invert else (text[:tamanho + 1]))[
-        0] <= max_width:
+    # enquanto o tamanho que cabe do texto não tiver chegado no último caractere e o tamanho do texto não
+    # tiver passado o max_width
+    while (tamanho < len(text) and
+           font.size((text[-(tamanho + 1):]) if invert else (text[:tamanho + 1]))[0] <= max_width):
         # incrementa uma letra que ira ser mostrada
         tamanho += 1
 
@@ -184,6 +186,7 @@ class Chat:
                 # se a quantidade de texto for maior que o maximo de mensagens no chat, tira a primeira da fila
                 self.chat_messages.pop(0)
 
+
     def get_chat_input(self, event) -> str:
         value: str
 
@@ -295,8 +298,8 @@ class Board:
 
         return col_init, row_init
 
+
     def remove_piece(self, row, col, current_player) -> bool:
-        print(f"remove({row}, {col}, {current_player})")
         removed = False
         test = [-1, 1]
 
@@ -316,8 +319,6 @@ class Board:
                 self.board[row][col+i] = -1
                 self.pieces_placed[current_player] -= 1
                 removed = True
-
-            print("\n\n\n\n")
 
         return removed
 
@@ -424,7 +425,8 @@ class Game:
         WON                  = 7
         CANCEL               = 8
         NEXT_PLAYER          = 9
-    
+
+
     def __init__(self):
         self.enemy_game            = None
         self.run            :bool  = True
@@ -479,7 +481,6 @@ class Game:
         return Window.BTNPressed.GIVE_UP_BTN
 
 
-
     def add_chat_messages(self, texto:str, origin:str="player"):
         print("add_chat_messages")
         self.window.chat.add_chat_messages(texto, origin)
@@ -523,15 +524,27 @@ class Game:
             server.send_message(Server.MessagesEnum.putPeace, (row, col, False))
 
 
+    def check_victory(self) -> bool:
+        if self.game_state == 1 and (self.window.board.pieces_placed[0] == 0 or self.window.board.pieces_placed[1] == 0):
+            self.add_chat_messages(f"vitoria do {"player" if self.sistem_player == self.current_player else "opponent"}", "sistema")
+            self.players[PLAYER_ID if self.current_player == self.sistem_player else OPPONENT_ID].points += 1
+            return True
+        return False
+
+
     def pass_turn(self, send: bool = True):
         print(f"pass_turn({send})")
+
+        if send:
+            server.send_message(Server.MessagesEnum.passTurn, (False, ))
+        else:
+            self.check_victory()
+
         self.current_player = 1 - self.current_player
 
         if sum(self.window.board.pieces_placed) >= self.max_pieces * 2:
             self.game_state = 1
 
-        if send:
-            server.send_message(Server.MessagesEnum.passTurn, (False, ))
 
 
     def move_peace(self, row_init: int, col_init: int, row_end: int, col_end: int, send: bool = True) -> bool:
@@ -549,7 +562,6 @@ class Game:
         self.window.board.selected_piece = [-1, -1]
 
         return Window.BTNPressed.CANCEL_BTN
-
 
 
     def handle_placement(self, pos) -> bool:
@@ -599,7 +611,6 @@ class Game:
 
                             if self.window.buttons.verify_btn(position=position) == self.window.BTNPressed.CANCEL_BTN:
                                 if first_play:
-                                    print("players_turn->canceled")
                                     return Game.PlayersTurnStatus.CANCEL
                                 return Game.PlayersTurnStatus.NEXT_PLAYER
 
@@ -617,21 +628,20 @@ class Game:
                                         self.window.board.selected_piece = [row_end, col_end]
 
                                         if self.move_peace(row_init, col_init, row_end, col_end):
-                                            if self.window.board.pieces_placed[0] == 0 or self.window.board.pieces_placed[1] == 0:
-                                                self.add_chat_messages(f"vitoria do jogador {self.current_player + 1}", "sistema")
-                                                self.players[PLAYER_ID if self.current_player == self.sistem_player else OPPONENT_ID].points += 1
+                                            if self.check_victory():
                                                 return Game.PlayersTurnStatus.WON
 
                                             row_end, row_init = row_init, row_end
                                             col_end, col_init = col_init, col_end
                                             first_play = False
                                             continue
+
                                         self.window.board.selected_piece = [-1, -1]
                                         return Game.PlayersTurnStatus.MOVED_WITHOUT_REMOVE
 
                 return Game.PlayersTurnStatus.ERROR
 
-            elif self.window.board.board[row_init][col_init] is None:
+            elif self.window.board.board[row_init][col_init] == -1:
                 self.add_chat_messages("nenhuma peça selecionada", "sistema")
                 return Game.PlayersTurnStatus.VOID_SPACE
 
@@ -690,6 +700,7 @@ class Server:
         giveUp         = 6
         notOccupied    = 7
 
+
     def __init__(self):
         self.messageCommand : Server.MessagesEnum = Server.MessagesEnum.noMessage
         self.messageArgs    : tuple = ()
@@ -722,7 +733,7 @@ class Server:
             self.semaforo.acquire()
             self.semaforo1.acquire()
             if self.messageCommand != Server.MessagesEnum.noMessage:
-                # try:
+                try:
                     if self.messageCommand == Server.MessagesEnum.playerMessages:
                         Proxy(uri_remoto).add_chat_messages(*self.messageArgs, **self.messageKargs)
 
@@ -747,14 +758,14 @@ class Server:
                     elif self.messageCommand == Server.MessagesEnum.notOccupied:
                         Proxy(uri_remoto).not_occupied(*self.messageArgs, **self.messageKargs)
 
-                # except Exception as e:
-                #     print(e)
+                except Exception as e:
+                    print(e)
 
-                    self.messageCommand = Server.MessagesEnum.noMessage
-                    self.messageArgs    = ()
-                    self.messageKargs   = {}
+                self.messageCommand = Server.MessagesEnum.noMessage
+                self.messageArgs    = ()
+                self.messageKargs   = {}
 
-                    self.semaforo1.release()
+                self.semaforo1.release()
 
 
 def iniciar_servidor():
@@ -784,8 +795,6 @@ def main():
 
     thread_client = threading.Thread(target=server.run, daemon=True)
     thread_client.start()
-
-    time.sleep(2)
 
     game.run_game()
 
